@@ -5,9 +5,6 @@ import gregtech.api.GregTechAPI;
 import gregtech.api.enums.ItemList;
 import gregtech.api.enums.Materials;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
-import gregtech.api.metatileentity.BaseMetaPipeEntity;
-import gregtech.api.metatileentity.BaseMetaTileEntity;
-import gregtech.api.metatileentity.MetaPipeEntity;
 import gregtech.common.blocks.BlockMachines;
 import gregtech.common.blocks.BlockFrameBox;
 import java.io.IOException;
@@ -18,9 +15,8 @@ import mods.railcraft.common.blocks.machine.beta.EnumMachineBeta;
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.tileentity.TileEntity;
 
 final class Schematics {
     // Порядок граней сайта: +X, -X, +Y, -Y, +Z, -Z.
@@ -29,12 +25,16 @@ final class Schematics {
     static final class Part {
         final Block block;
         final int metadata;
-        final TileEntity tile;
+        final int machineId;
+        final int facing;
+        final byte connections;
 
-        Part(Block block, int metadata, TileEntity tile) {
+        Part(Block block, int metadata, int machineId, int facing, byte connections) {
             this.block = block;
             this.metadata = metadata;
-            this.tile = tile;
+            this.machineId = machineId;
+            this.facing = facing;
+            this.connections = connections;
         }
     }
 
@@ -45,7 +45,9 @@ final class Schematics {
             Blueprint.Material material = blueprint.palette[i];
             items[i] = resolve(material, blueprint.tier);
             Block block = items[i] == null ? null : Block.func_149634_a(items[i].func_77973_b());
-            if (block == null || block == Blocks.field_150350_a) unknown.add(material.name);
+            if (block == null || block == Blocks.field_150350_a || !(items[i].func_77973_b() instanceof ItemBlock)) {
+                unknown.add(material.name);
+            }
         }
         if (!unknown.isEmpty()) {
             throw new IOException("Не сопоставлены блоки (" + unknown.size() + "): " + String.join(", ", unknown));
@@ -61,25 +63,7 @@ final class Schematics {
                 IMetaTileEntity definition = meta > 0 && meta < GregTechAPI.METATILEENTITIES.length ? GregTechAPI.METATILEENTITIES[meta] : null;
                 if (definition == null) throw new IOException("Нет блока GregTech с номером " + meta);
                 int baseType = definition.getTileEntityBaseType();
-                TileEntity tile = ((BlockMachines) block).createTileEntity(null, baseType);
-                NBTTagCompound data = new NBTTagCompound();
-                data.func_74777_a("mID", (short) meta);
-                data.func_74777_a("mFacing", (short) facing);
-                data.func_74774_a("mConnections", pipeMask(cell[5]));
-                if (tile instanceof BaseMetaTileEntity) {
-                    BaseMetaTileEntity machine = (BaseMetaTileEntity) tile;
-                    machine.func_145839_a(data);
-                } else if (tile instanceof BaseMetaPipeEntity) {
-                    BaseMetaPipeEntity pipe = (BaseMetaPipeEntity) tile;
-                    pipe.func_145839_a(data);
-                    pipe.mConnections = pipeMask(cell[5]);
-                    if (pipe.getMetaTileEntity() instanceof MetaPipeEntity) {
-                        ((MetaPipeEntity) pipe.getMetaTileEntity()).mConnections = pipe.mConnections;
-                    }
-                } else {
-                    throw new IOException("Неизвестный тип блока GregTech " + meta);
-                }
-                parts[i] = new Part(block, baseType, tile);
+                parts[i] = new Part(block, baseType, meta, facing, pipeMask(cell[5]));
             } else {
                 if (block == Blocks.field_150486_ae) meta = facing < 2 ? 3 : facing;
                 if (block == Blocks.field_150438_bZ) meta = cell[4] >= 0 ? (facing == 1 ? 0 : facing) :
@@ -87,7 +71,7 @@ final class Schematics {
                 if (meta > 15 && !(block instanceof BlockFrameBox)) {
                     throw new IOException("Неподдерживаемый вариант блока " + blueprint.palette[cell[3]].kind);
                 }
-                parts[i] = new Part(block, meta, null);
+                parts[i] = new Part(block, meta, 0, facing, (byte) 0);
             }
         }
         return parts;

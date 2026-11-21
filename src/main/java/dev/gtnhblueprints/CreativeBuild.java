@@ -3,15 +3,19 @@ package dev.gtnhblueprints;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
 import java.io.IOException;
+import java.util.BitSet;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayerMP;
-import net.minecraft.nbt.NBTTagCompound;
+import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+import gregtech.api.metatileentity.BaseMetaPipeEntity;
+import gregtech.api.metatileentity.MetaPipeEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.world.World;
+import net.minecraftforge.common.util.ForgeDirection;
 
 /** Постройка выполняется по тикам встроенного сервера одиночной игры. */
 public final class CreativeBuild {
@@ -57,6 +61,8 @@ public final class CreativeBuild {
         final Schematics.Part[] parts;
         final int x, y, z;
         int cursor, placed, skipped;
+        final BitSet pipes = new BitSet();
+        int pipeCursor, rejectedSides;
         int rate = 20;
         int credit, stable;
         long lastTick;
@@ -81,7 +87,7 @@ public final class CreativeBuild {
             while (credit >= 20 && cursor < blueprint.blocks.length) {
                 credit -= 20;
                 int index = cursor++;
-                if (place(world, player, blueprint.blocks[index], parts[index])) placed++;
+                if (place(world, player, index)) placed++;
                 else skipped++;
                 if (System.nanoTime() - start > 4_000_000L) {
                     credit %= 20;
@@ -89,12 +95,21 @@ public final class CreativeBuild {
                     break;
                 }
             }
+            // Только после установки оборудования соединяем трубы с уже существующими портами.
+            while (cursor == blueprint.blocks.length && credit >= 20 && System.nanoTime() - start <= 4_000_000L) {
+                int index = pipes.nextSetBit(pipeCursor);
+                if (index < 0) break;
+                pipeCursor = index + 1;
+                credit -= 20;
+                connectPipe(world, index);
+            }
             if (++stable >= 40) {
                 rate = Math.min(50, rate + 5);
                 stable = 0;
             }
-            if (cursor < blueprint.blocks.length) return false;
-            player.func_145747_a(new ChatComponentText("Чертёж: поставлено " + placed + ", пропущено " + skipped + "."));
+            if (cursor < blueprint.blocks.length || pipes.nextSetBit(pipeCursor) >= 0) return false;
+            player.func_145747_a(new ChatComponentText("Чертёж: поставлено " + placed + ", пропущено " + skipped +
+                ". Сторон труб без подключения: " + rejectedSides + "."));
             return true;
         }
 
@@ -103,24 +118,63 @@ public final class CreativeBuild {
             stable = 0;
         }
 
-        private boolean place(World world, EntityPlayerMP player, int[] cell, Schematics.Part part) {
+        private boolean place(World world, EntityPlayerMP player, int index) {
+            int[] cell = blueprint.blocks[index];
+            Schematics.Part part = parts[index];
             int wx = x + cell[0], wy = y + cell[1], wz = z + cell[2];
             if (!world.func_72899_e(wx, wy, wz) || !world.func_147437_c(wx, wy, wz) ||
                 player.field_70121_D.func_72326_a(AxisAlignedBB.func_72330_a(wx, wy, wz, wx + 1, wy + 1, wz + 1))) return false;
-            TileEntity source = part.tile;
-            if (!world.func_147465_d(wx, wy, wz, part.block, part.metadata, 3)) return false;
-            TileEntity target = source == null ? null : world.func_147438_o(wx, wy, wz);
-            if (target != null) {
-                NBTTagCompound data = new NBTTagCompound();
-                source.func_145841_b(data);
-                data.func_74768_a("x", wx);
-                data.func_74768_a("y", wy);
-                data.func_74768_a("z", wz);
-                target.func_145839_a(data);
+            if (part.machineId == 0) return world.func_147465_d(wx, wy, wz, part.block, part.metadata, 3);
+            // Пока у корпуса нет данных машины, не рассылаем его клиенту и не оповещаем соседей.
+            if (!world.func_147465_d(wx, wy, wz, part.block, part.metadata, 0)) return false;
+            TileEntity target = world.func_147438_o(wx, wy, wz);
+            if (target instanceof IGregTechTileEntity && initialize((IGregTechTileEntity) target, player, part)) {
+                if (target instanceof BaseMetaPipeEntity) pipes.set(index);
                 target.func_145843_s();
                 world.func_147471_g(wx, wy, wz);
+                return true;
             }
+            clearFailedPlacement(world, wx, wy, wz, part);
+            return false;
+        }
+
+        private void clearFailedPlacement(World world, int x, int y, int z, Schematics.Part part) {
+            if (world.func_147439_a(x, y, z) == part.block) world.func_147468_f(x, y, z);
+        }
+
+        private boolean initialize(IGregTechTileEntity target, EntityPlayerMP player, Schematics.Part part) {
+            target.setInitialValuesAsNBT(null, (short) part.machineId);
+            if (target.getMetaTileEntity() == null || target.getMetaTileID() != part.machineId) return false;
+            target.setOwnerName(player.func_70005_c_());
+            target.setOwnerUuid(player.func_110124_au());
+            target.setFrontFacing(ForgeDirection.getOrientation(part.facing));
+            target.getMetaTileEntity().initDefaultModes(null);
             return true;
+        }
+
+        private void connectPipe(World world, int index) {
+            int[] cell = blueprint.blocks[index];
+            Schematics.Part part = parts[index];
+            int wx = x + cell[0], wy = y + cell[1], wz = z + cell[2];
+            TileEntity tile = world.func_72899_e(wx, wy, wz) ? world.func_147438_o(wx, wy, wz) : null;
+            if (!(tile instanceof BaseMetaPipeEntity)) {
+                rejectedSides += Integer.bitCount(part.connections & 63);
+                return;
+            }
+            BaseMetaPipeEntity base = (BaseMetaPipeEntity) tile;
+            if (base.getMetaTileID() != part.machineId || !(base.getMetaTileEntity() instanceof MetaPipeEntity)) {
+                rejectedSides += Integer.bitCount(part.connections & 63);
+                return;
+            }
+            MetaPipeEntity pipe = (MetaPipeEntity) base.getMetaTileEntity();
+            for (ForgeDirection side : ForgeDirection.VALID_DIRECTIONS) {
+                if ((part.connections & side.flag) == 0) continue;
+                pipe.connect(side);
+                if (!pipe.isConnectedAtSide(side)) rejectedSides++;
+            }
+            base.updateConnections();
+            base.syncConnectionToClient();
+            base.func_145843_s();
         }
     }
 }

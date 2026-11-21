@@ -21,7 +21,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.client.event.GuiScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 
-@Mod(modid = "gtnhblueprints", name = "GTNH Blueprints", version = "0.1.4",
+@Mod(modid = "gtnhblueprints", name = "GTNH Blueprints", version = "0.1.7",
     acceptedMinecraftVersions = "[1.7.10]", acceptableRemoteVersions = "*",
     dependencies = "required-after:gregtech;required-after:Railcraft")
 public final class BlueprintMod {

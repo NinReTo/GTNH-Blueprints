@@ -60,5 +60,5 @@ classpath = ";".join(map(str, dependencies))
 with tempfile.TemporaryDirectory(prefix="classes-", dir=out) as classes:
     run("javac", "--release", "8", "-Xlint:-options", "-proc:none", "-encoding", "UTF-8", "-cp", classpath, "-d", classes,
         *sorted((root / "src/main/java").rglob("*.java")))
-    run("jar", "--create", "--file", out / "gtnh-blueprints-0.1.4.jar", "-C", classes, "dev",
+    run("jar", "--create", "--file", out / "gtnh-blueprints-0.1.7.jar", "-C", classes, "dev",
         "-C", root / "src/main/resources", ".")
