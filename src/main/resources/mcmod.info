@@ -1,0 +1,9 @@
+[
+  {
+    "modid": "gtnhblueprints",
+    "name": "GTNH Blueprints",
+    "description": "Библиотека чертежей калькулятора фабрики с голограммой в мире.",
+    "version": "0.1.4",
+    "mcversion": "1.7.10"
+  }
+]
